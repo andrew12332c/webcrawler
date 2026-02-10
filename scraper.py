@@ -1,6 +1,7 @@
 import re
 from urllib.parse import urlparse, urljoin, urldefrag, parse_qs
 from bs4 import BeautifulSoup
+from collections import Counter, defaultdict
 #from PartA import tokenize, computeWordFrequencies, printFrequencies
 
 ALLOWED_DOMAINS = ("ics.uci.edu", "cs.uci.edu", "informatics.uci.edu", "stat.uci.edu",)
