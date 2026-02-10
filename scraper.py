@@ -87,7 +87,7 @@ def scraper(url, resp):
     links = extract_next_links(final_url, resp, count_text=first_time)
     return [link for link in links if is_valid(link)]
 
-def extract_next_links(url, resp):
+def extract_next_links(url, resp, count_text=False):
     # Implementation required.
     # url: the URL that was used to get the page
     # resp.url: the actual url of the page
