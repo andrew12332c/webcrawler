@@ -11,6 +11,7 @@ def scraper(url, resp):
     return [link for link in links if is_valid(link)]
 
 def extract_next_links(url, resp):
+    links = []
     # Implementation required.
     # url: the URL that was used to get the page
     # resp.url: the actual url of the page
@@ -22,13 +23,12 @@ def extract_next_links(url, resp):
     # Return a list with the hyperlinks (as strings) scrapped from resp.raw_response.content
 
     if resp is None or resp.status != 200 or resp.raw_response is None:
-        return []
+        return links
 
     content_type = resp.raw_response.headers.get("Content-Type", "").lower()
     if "text/html" not in content_type:
-        return []
+        return links
 
-    links = []
     try:
         soup = BeautifulSoup(resp.raw_response.content, "lxml")
         for tag in soup.find_all("a", href=True):
