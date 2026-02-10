@@ -1,5 +1,9 @@
 import re
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin, urldefrag, parse_qs
+from bs4 import BeautifulSoup
+#from PartA import tokenize, computeWordFrequencies, printFrequencies
+
+ALLOWED_DOMAINS = ("ics.uci.edu", "cs.uci.edu", "informatics.uci.edu", "stat.uci.edu",)
 
 def scraper(url, resp):
     links = extract_next_links(url, resp)
@@ -15,7 +19,29 @@ def extract_next_links(url, resp):
     #         resp.raw_response.url: the url, again
     #         resp.raw_response.content: the content of the page!
     # Return a list with the hyperlinks (as strings) scrapped from resp.raw_response.content
-    return list()
+
+    if resp is None or resp.status != 200 or resp.raw_response is None:
+        return []
+
+    content_type = resp.raw_response.headers.get("Content-Type", "").lower()
+    if "text/html" not in content_type:
+        return []
+
+    links = []
+    try:
+        soup = BeautifulSoup(resp.raw_response.content, "lxml")
+        for tag in soup.find_all("a", href=True):
+            href = tag.get("href")
+
+            absolute = urljoin(resp.url, href)
+
+            absolute, _ = urldefrag(absolute)
+
+            links.append(absolute)
+    except Exception:
+        return []
+
+    return links
 
 def is_valid(url):
     # Decide whether to crawl this url or not. 
@@ -25,6 +51,13 @@ def is_valid(url):
         parsed = urlparse(url)
         if parsed.scheme not in set(["http", "https"]):
             return False
+        
+        host = parsed.hostname
+        if host is None or not any(
+            host == d or host.endswith("." + d) for d in ALLOWED_DOMAINS
+        ):
+            return False
+        
         return not re.match(
             r".*\.(css|js|bmp|gif|jpe?g|ico"
             + r"|png|tiff?|mid|mp2|mp3|mp4"
