@@ -53,7 +53,9 @@ MIN_TEXT_LEN = 50
 ALLOWED_SUFFIXES = ("ics.uci.edu", "cs.uci.edu", "informatics.uci.edu", "stat.uci.edu")
 ICS_SUBDOMAIN_BLACKLIST = {"ngs.ics.uci.edu", "grape.ics.uci.edu", "intranet.ics.uci.edu"}
 
-BLACKLIST_KEYWORDS = {"wics", "calendar", "ical", "tribe", "doku", "eppstein", "/events"}
+BLACKLIST_KEYWORDS = {
+    "wics", "calendar", "ical", "tribe", "doku", "eppstein", "/events", "~eppstein/pix", "gallery", "archive.ics.uci.edu", "action=diff", "action=edit", "share=", "print=", "format=pdf", "rev=", "do=media"
+}
 
 CALENDAR_TRAPS = re.compile(
     r"/(20[0-4][0-9]|19[7-9][0-9])"
