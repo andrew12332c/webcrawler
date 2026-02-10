@@ -125,7 +125,7 @@ def extract_next_links(url, resp):
 
 def _count_subdomain(page_url):
     host = (urlparse(page_url).hostname or "").lower()
-    if host.endswith(".uci.edu"):
+    if "uci.edu" in host and (host == "uci.edu" or host.endswith(".uci.edu")):
         if page_url not in COUNTED_PER_SUBDOMAIN[host]:
             COUNTED_PER_SUBDOMAIN[host].add(page_url)
             SUBDOMAIN_COUNTS[host] += 1
