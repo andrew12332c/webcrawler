@@ -3,7 +3,7 @@ ABOUT
 This is the base implementation of a full crawler that uses a spacetime
 cache server to receive requests.
 
-CONFIGURATION
+CONFIGURATION test
 -------------------------
 
 ### Step 1: Install dependencies
@@ -218,6 +218,8 @@ THINGS TO KEEP IN MIND
    both. Mechanisms can be used to avoid that, however the politeness limits
    still apply and will be checked.
 6. Do not attempt to download the links directly from ics servers.
-#   w e b c r a w l e r  
- #   w e b c r a w l e r  
+#   w e b c r a w l e r 
+ 
+ #   w e b c r a w l e r 
+ 
  
