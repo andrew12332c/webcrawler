@@ -25,7 +25,7 @@ def extract_next_links(url, resp):
     if resp is None or resp.status != 200 or resp.raw_response is None:
         return links
 
-    content_type = resp.raw_response.headers.get("Content-Type", "").lower()
+    content_type = (resp.raw_response.headers.get("Content-Type", ""), or ").lower()
     if "text/html" not in content_type:
         return links
 
