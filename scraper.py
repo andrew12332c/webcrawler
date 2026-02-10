@@ -29,7 +29,7 @@ STOPWORDS = {
     "we'll","we're","we've","were","weren't","what","what's","when",
     "when's","where","where's","which","while","who","who's","whom","why",
     "why's","with","won't","would","wouldn't","you","you'd","you'll",
-    "you're","you_ve","your","yours","yourself","yourselves"
+    "you're","you've","your","yours","yourself","yourselves"
 }
 
 SUBDOMAIN_COUNTS = defaultdict(int)
@@ -48,7 +48,7 @@ ALLOWED_SUFFIXES = ("ics.uci.edu", "cs.uci.edu", "informatics.uci.edu", "stat.uc
 ICS_SUBDOMAIN_BLACKLIST = {"ngs.ics.uci.edu", "grape.ics.uci.edu", "intranet.ics.uci.edu"}
 
 # Merged blacklist and Regex patterns
-BLACKLIST_KEYWORDS = {"wics", "calendar", "ical", "tribe", "doku", "eppstein", "/events"}
+BLACKLIST_KEYWORDS = {"wics", "calendar", "doku", "physics.edu", "eppstein", "\events", "gallery"}
 CALENDAR_TRAPS = re.compile(r"/(20[0-4][0-9]|19[7-9][0-9])(/(0?[1-9]|1[0-2])(/(0?[1-9]|[12][0-9]|3[01]))?)?")
 BAD_EXT_RE = re.compile(r".*\.(css|js|bmp|gif|jpe?g|ico|png|tiff?|mid|mp2|mp3|mp4|wav|avi|mov|mpeg|ram|m4v|mkv|ogg|ogv|pdf|ps|eps|tex|ppt|pptx|doc|docx|xls|xlsx|names|data|dat|exe|bz2|tar|msi|bin|7z|psd|dmg|iso|epub|dll|cnf|tgz|sha1|thmx|mso|arff|rtf|jar|csv|rm|smil|wmv|swf|wma|zip|rar|gz)$", re.IGNORECASE)
 WORD_RE = re.compile(r"[a-zA-Z0-9]+")
