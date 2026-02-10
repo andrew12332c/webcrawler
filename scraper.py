@@ -34,8 +34,8 @@ STOPWORDS = {
 # -------------------------
 # Globals / report state
 # -------------------------
-SUBDOMAIN_COUNTS = defaultdict(int)
-COUNTED_PER_SUBDOMAIN = defaultdict(set)
+SUBDOMAIN_COUNTS = defaultdict(int)        # subdomain -> count of unique pages
+COUNTED_PER_SUBDOMAIN = defaultdict(set)   # subdomain -> set(urls)
 
 LONGEST_PAGE = ("", 0)  # (url, word_count)
 
@@ -52,11 +52,9 @@ TOTAL_VISITED = 0
 
 ALLOWED_SUFFIXES = ("ics.uci.edu", "cs.uci.edu", "informatics.uci.edu", "stat.uci.edu")
 
-ICS_SUBDOMAIN_BLACKLIST = {"ngs.ics.uci.edu", "grape.ics.uci.edu"}
+ICS_SUBDOMAIN_BLACKLIST = {"ngs.ics.uci.edu", "grape.ics.uci.edu", "intranet.ics.uci.edu"}
 
-BLACKLIST_KEYWORDS = {
-    "wics", "calendar", "ical", "tribe", "doku", "eppstein", "/events"
-}
+BLACKLIST_KEYWORDS = {"wics", "calendar", "ical", "tribe", "doku", "eppstein", "/events"}
 
 CALENDAR_TRAPS = re.compile(
     r"/(20[0-4][0-9]|19[7-9][0-9])"
@@ -79,7 +77,7 @@ BAD_EXTENSIONS = re.compile(
 def scraper(url, resp):
     """
     Starter flow: extract links, then filter with is_valid.
-    We update page-level analytics inside extract_next_links.
+    Page-level analytics happen in extract_next_links.
     """
     global TOTAL_VISITED
     TOTAL_VISITED += 1
@@ -89,14 +87,14 @@ def scraper(url, resp):
 
 def extract_next_links(url, resp):
     """
-    - Only parse 200 HTML responses
-    - Defragment URLs (spec requirement)
-    - Extract <a href> links
-    - Extract text and update:
-        * UNIQUE_PAGES
-        * LONGEST_PAGE
-        * SUBDOMAIN_COUNTS
-        * write corpus file
+    - Parse only valid HTML (status 200, reasonable size)
+    - Defragment page URL for uniqueness
+    - Extract outgoing links (defragmented)
+    - Update:
+        * UNIQUE_PAGES (URL uniqueness ignoring fragment)
+        * LONGEST_PAGE (word count from visible text, stopwords NOT removed)
+        * SUBDOMAIN_COUNTS (unique pages per subdomain, counted for "real" pages)
+        * write corpus of stopword-filtered words for later top-50
     """
     if resp is None or resp.status != 200 or resp.raw_response is None:
         return []
@@ -108,19 +106,19 @@ def extract_next_links(url, resp):
     if len(content) > MAX_PAGE_SIZE:
         return []
 
+    headers = getattr(resp.raw_response, "headers", {}) or {}
+    ctype = (headers.get("Content-Type", "") or "").lower()
+    if "text/html" not in ctype:
+        return []
+
     # canonical URL (handles redirects), then defragment for uniqueness
     page_url = getattr(resp, "url", None) or url
     page_url, _ = urldefrag(page_url)
 
-    # avoid re-processing same page by the assignment definition
+    # don't re-process the same page (by assignment definition)
     if page_url in UNIQUE_PAGES:
         return []
     UNIQUE_PAGES.add(page_url)
-
-    # only HTML (helps avoid weird non-text content)
-    ctype = (resp.raw_response.headers.get("Content-Type", "") or "").lower()
-    if "text/html" not in ctype:
-        return []
 
     links = []
 
@@ -129,35 +127,38 @@ def extract_next_links(url, resp):
 
         # extract outgoing links
         for a in soup.find_all("a", href=True):
-            href = a.get("href", "").strip()
+            href = (a.get("href") or "").strip()
             if not href:
                 continue
             absolute = urljoin(page_url, href)
             absolute, _ = urldefrag(absolute)
             links.append(absolute)
 
-        # remove some non-content tags for cleaner text
+        # remove non-content tags for cleaner text
         for tag in soup(["script", "style", "noscript"]):
             tag.decompose()
 
         text = soup.get_text(separator=" ", strip=True)
 
-        # still count subdomain / uniqueness even if low text, but don't save/measure longest
-        _count_subdomain(page_url)
-
+        # if it's basically empty, don't count it for longest/subdomain/corpus,
+        # but still return the discovered links.
         if len(text) < MIN_TEXT_LEN:
             return links
 
-        # compute word count ignoring stopwords (also used for longest page)
-        words = re.findall(r"[a-zA-Z0-9']+", text.lower())
-        words = [w for w in words if w not in STOPWORDS and len(w) > 1]
-        word_count = len(words)
+        # ---- (2) Longest page: count ALL words in visible text (no stopword removal)
+        all_words = re.findall(r"[a-zA-Z0-9]+", text.lower())
+        total_word_count = len(all_words)
 
         global LONGEST_PAGE
-        if word_count > LONGEST_PAGE[1]:
-            LONGEST_PAGE = (page_url, word_count)
+        if total_word_count > LONGEST_PAGE[1]:
+            LONGEST_PAGE = (page_url, total_word_count)
 
-        _write_corpus(page_url, " ".join(words))
+        # ---- (4) Subdomain counting: count unique "real" pages
+        _count_subdomain(page_url)
+
+        # ---- corpus for top-50: stopword filtered words
+        meaningful_words = [w for w in all_words if w not in STOPWORDS and len(w) > 1]
+        _write_corpus(page_url, " ".join(meaningful_words))
 
     except Exception as e:
         print("extract_next_links error:", e)
@@ -173,9 +174,6 @@ def _write_corpus(page_url: str, text: str) -> None:
 
 
 def _count_subdomain(page_url: str) -> None:
-    """
-    Count subdomains by unique pages (defragmented URL).
-    """
     parsed = urlparse(page_url)
     host = (parsed.hostname or "").lower()
     if host.endswith(".uci.edu"):
