@@ -164,7 +164,7 @@ def is_valid(url):
         # Structural Traps
         if CALENDAR_TRAPS.search(path) and path.count("/") > 4: return False
         if re.search(r"/(.+/)\1", path): return False # Repeating segments
-        if path.count("/") > 10 or len(url) > 250: return False
+        if path.count("/") > 12 or len(url) > 250: return False
 
         return True
     except Exception:
