@@ -161,7 +161,7 @@ def _host_allowed(host: str) -> bool:
 
 def _count_subdomain(host: str, url: str):
     # Count unique crawled pages per subdomain under uci.edu.
-    if not host.endswith(".uci.edu"):
+    if not _host_allowed(host):
         return
 
     seen_set = COUNTED_PER_SUBDOMAIN.get(host)
