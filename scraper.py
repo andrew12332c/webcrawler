@@ -54,7 +54,7 @@ ALLOWED_SUFFIXES = ("ics.uci.edu", "cs.uci.edu", "informatics.uci.edu", "stat.uc
 ICS_SUBDOMAIN_BLACKLIST = {"ngs.ics.uci.edu", "grape.ics.uci.edu", "intranet.ics.uci.edu"}
 
 BLACKLIST_KEYWORDS = {
-    "wics", "calendar", "ical", "tribe", "doku", "eppstein", "/events", "~eppstein/pix", "gallery", "archive.ics.uci.edu", "action=diff", "action=edit", "share=", "print=", "format=pdf", "rev=", "do=media"
+    "wics", "calendar", "ical", "tribe", "doku", "eppstein", "/events", "~eppstein/pix", "gallery","rev=", "do=media"
 }
 
 CALENDAR_TRAPS = re.compile(
