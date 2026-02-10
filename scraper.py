@@ -14,7 +14,7 @@ WORD_FREQ = {}
 
 MAX_PAGE_SIZE = 5_000_000
 MIN_TEXT_LEN = 50
-STOPWORDS = {
+STOP_WORDS = {
     "a","about","above","after","again","against","all","am","an","and","any",
     "are","aren't","as","at","be","because","been","before","being","below",
     "between","both","but","by","can't","cannot","could","couldn't","did",
@@ -57,10 +57,6 @@ BAD_EXT_RE = re.compile(
     r"|rm|smil|wmv|swf|wma|zip|rar|gz)$",
     re.IGNORECASE
 )
-
-STOP_WORDS = {
-" "
-}
 
 def scraper(url, resp):
     global TOTAL_VISITED
@@ -143,16 +139,13 @@ def extract_next_links(url, resp, count_text=False):
                     LONGEST_PAGE = (base_url, word_count)
 
                 # TOP WORDS (ignore stop words)
-                tokens = tokenize(text)
-                freqs = computeWordFrequencies(tokens)
-
-                for w, c in freqs.items():
-                    w = w.lower()
+                words = re.findall(r"[a-zA-Z]{2,}", text.lower())
+                for w in words:
                     if w in STOP_WORDS:
                         continue
-                    if len(w) <= 1:
-                        continue
-                    WORD_FREQ[w] = WORD_FREQ.get(w, 0) + c
+                    WORD_FREQ[w] = WORD_FREQ.get(w, 0) + 1
+
+                
 
     except Exception as e:
         print("error in extract_next_links:", e)
