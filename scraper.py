@@ -1,20 +1,16 @@
+import os
 import re
+import atexit
+from collections import defaultdict, Counter
+from hashlib import md5
 from urllib.parse import urlparse, urljoin, urldefrag, parse_qs
 from bs4 import BeautifulSoup
-from PartA import tokenize, computeWordFrequencies, printFrequencies
-import atexit
 
-# Global
-SUBDOMAIN_COUNTS = {}
-COUNTED_PER_SUBDOMAIN = {}
-LONGEST_PAGE = ("", 0)
-TOTAL_VISITED = 0
-UNIQUE_PAGES = set()
-WORD_FREQ = {}
-
-MAX_PAGE_SIZE = 5_000_000
-MIN_TEXT_LEN = 50
-STOP_WORDS = {
+# -------------------------
+# Configuration & Globals
+# -------------------------
+# Merged Stopwords: Ensures we use the full list
+STOPWORDS = {
     "a","about","above","after","again","against","all","am","an","and","any",
     "are","aren't","as","at","be","because","been","before","being","below",
     "between","both","but","by","can't","cannot","could","couldn't","did",
@@ -33,241 +29,159 @@ STOP_WORDS = {
     "we'll","we're","we've","were","weren't","what","what's","when",
     "when's","where","where's","which","while","who","who's","whom","why",
     "why's","with","won't","would","wouldn't","you","you'd","you'll",
-    "you're","you've","your","yours","yourself","yourselves"
+    "you're","you_ve","your","yours","yourself","yourselves"
 }
 
+SUBDOMAIN_COUNTS = defaultdict(int)
+COUNTED_PER_SUBDOMAIN = defaultdict(set)
+LONGEST_PAGE = ("", 0)
+UNIQUE_PAGES = set()
+WORD_FREQ = Counter()
+
+# Persistence setup from Reference
+CORPUS_DIRECTORY = "data/corpus"
+os.makedirs(CORPUS_DIRECTORY, exist_ok=True)
+
+MAX_PAGE_SIZE = 5_000_000
+MIN_TEXT_LEN = 50
 ALLOWED_SUFFIXES = ("ics.uci.edu", "cs.uci.edu", "informatics.uci.edu", "stat.uci.edu")
-ICS_SUBDOMAIN_BLACKLIST = {"ngs.ics.uci.edu", "grape.ics.uci.edu", "intranet.ics.uci.edu"} 
+ICS_SUBDOMAIN_BLACKLIST = {"ngs.ics.uci.edu", "grape.ics.uci.edu", "intranet.ics.uci.edu"}
 
+# Merged blacklist and Regex patterns
 BLACKLIST_KEYWORDS = {"wics", "calendar", "ical", "tribe", "doku", "eppstein", "/events"}
-CALENDAR_TRAPS = re.compile(
-    r"/(20[0-4][0-9]|19[7-9][0-9])"
-    r"(/(0?[1-9]|1[0-2])"
-    r"(/(0?[1-9]|[12][0-9]|3[01]))?)?"
-)
-
-BAD_EXT_RE = re.compile(
-    r".*\.(css|js|bmp|gif|jpe?g|ico"
-    r"|png|tiff?|mid|mp2|mp3|mp4"
-    r"|wav|avi|mov|mpeg|ram|m4v|mkv|ogg|ogv|pdf"
-    r"|ps|eps|tex|ppt|pptx|doc|docx|xls|xlsx|names"
-    r"|data|dat|exe|bz2|tar|msi|bin|7z|psd|dmg|iso"
-    r"|epub|dll|cnf|tgz|sha1"
-    r"|thmx|mso|arff|rtf|jar|csv"
-    r"|rm|smil|wmv|swf|wma|zip|rar|gz)$",
-    re.IGNORECASE
-)
+CALENDAR_TRAPS = re.compile(r"/(20[0-4][0-9]|19[7-9][0-9])(/(0?[1-9]|1[0-2])(/(0?[1-9]|[12][0-9]|3[01]))?)?")
+BAD_EXT_RE = re.compile(r".*\.(css|js|bmp|gif|jpe?g|ico|png|tiff?|mid|mp2|mp3|mp4|wav|avi|mov|mpeg|ram|m4v|mkv|ogg|ogv|pdf|ps|eps|tex|ppt|pptx|doc|docx|xls|xlsx|names|data|dat|exe|bz2|tar|msi|bin|7z|psd|dmg|iso|epub|dll|cnf|tgz|sha1|thmx|mso|arff|rtf|jar|csv|rm|smil|wmv|swf|wma|zip|rar|gz)$", re.IGNORECASE)
+WORD_RE = re.compile(r"[a-zA-Z0-9]+")
 
 def scraper(url, resp):
-    global TOTAL_VISITED
-
     if resp is None or resp.status != 200:
         return []
-
-    TOTAL_VISITED += 1
-
-    # Use final fetched URL and defragment it
-    final_url = resp.url if getattr(resp, "url", None) else url
-    final_url, _ = urldefrag(final_url)
-
-    first_time = False
-    if final_url not in UNIQUE_PAGES:
-        UNIQUE_PAGES.add(final_url)
-        first_time = True
-
-        # Count subdomain only for unique crawled pages
-        host = (urlparse(final_url).hostname or "").lower()
-        if host:
-            _count_subdomain(host, final_url)
-
-    links = extract_next_links(final_url, resp, count_text=first_time)
+    
+    links = extract_next_links(url, resp)
     return [link for link in links if is_valid(link)]
 
-def extract_next_links(url, resp, count_text=False):
-    # Implementation required.
-    # url: the URL that was used to get the page
-    # resp.url: the actual url of the page
-    # resp.status: the status code returned by the server. 200 is OK, you got the page. Other numbers mean that there was some kind of problem.
-    # resp.error: when status is not 200, you can check the error here, if needed.
-    # resp.raw_response: this is where the page actually is. More specifically, the raw_response has two parts:
-    #         resp.raw_response.url: the url, again
-    #         resp.raw_response.content: the content of the page!
-    # Return a list with the hyperlinks (as strings) scrapped from resp.raw_response.content
-
+def extract_next_links(url, resp):
     if resp is None or resp.status != 200 or resp.raw_response is None:
         return []
 
     content = getattr(resp.raw_response, "content", None)
-    if not content:
+    if not content or len(content) > MAX_PAGE_SIZE:
         return []
 
-    if len(content) > MAX_PAGE_SIZE:
+    # Filter by Content-Type
+    headers = getattr(resp.raw_response, "headers", {}) or {}
+    if "text/html" not in (headers.get("Content-Type", "") or "").lower():
         return []
 
-    content_type = resp.raw_response.headers.get("Content-Type", "").lower()
-    if "text/html" not in content_type:
+    page_url = getattr(resp, "url", None) or url
+    page_url, _ = urldefrag(page_url)
+
+    # Skip if already crawled
+    if page_url in UNIQUE_PAGES:
         return []
+    UNIQUE_PAGES.add(page_url)
 
     links = []
     try:
         soup = BeautifulSoup(content, "lxml")
 
-        base_url = resp.url if getattr(resp, "url", None) else url
-        base_url, _ = urldefrag(base_url)
-
-        # Extract <a href=...>
+        # 1. Extraction: Get all valid links
         for tag in soup.find_all("a", href=True):
-            raw_href = tag.get("href")
-            if not raw_href:
-                continue
-            raw_href = raw_href.strip()
-            if not raw_href:
-                continue
-
-            absolute = urljoin(base_url, raw_href)
+            href = (tag.get("href") or "").strip()
+            if not href: continue
+            absolute = urljoin(page_url, href)
             absolute, _ = urldefrag(absolute)
             links.append(absolute)
 
-        # Text stats (only for unique pages)
-        if count_text:
-            text = soup.get_text(separator=" ", strip=True)
-            if len(text) >= MIN_TEXT_LEN:
-                # LONGEST PAGE
-                word_count = len(text.split())
-                global LONGEST_PAGE
-                if word_count > LONGEST_PAGE[1]:
-                    LONGEST_PAGE = (base_url, word_count)
+        # 2. Textual Analysis: Remove non-content tags (The "Best of" Reference)
+        for tag in soup(["script", "style", "noscript"]):
+            tag.decompose()
 
-                # TOP WORDS (ignore stop words)
-                words = re.findall(r"[a-zA-Z]{2,}", text.lower())
-                for w in words:
-                    if w in STOP_WORDS:
-                        continue
-                    WORD_FREQ[w] = WORD_FREQ.get(w, 0) + 1
+        text = soup.get_text(separator=" ", strip=True)
+        if len(text) >= MIN_TEXT_LEN:
+            # Subdomain counting
+            _count_subdomain(page_url)
 
-                
+            # Tokenization using Regex
+            all_words = WORD_RE.findall(text.lower())
+            word_count = len(all_words)
+
+            # Update Longest Page
+            global LONGEST_PAGE
+            if word_count > LONGEST_PAGE[1]:
+                LONGEST_PAGE = (page_url, word_count)
+
+            # Frequency filtering (Using global STOPWORDS)
+            filtered = [w for w in all_words if w not in STOPWORDS and len(w) > 1]
+            WORD_FREQ.update(filtered)
+
+            # Write to disk for safety
+            _write_corpus(page_url, " ".join(filtered))
 
     except Exception as e:
-        print("error in extract_next_links:", e)
+        print(f"Error extracting {page_url}: {e}")
 
     return links
 
-def _host_allowed(host: str) -> bool:
-    host = host.lower()
-    for suffix in ALLOWED_SUFFIXES:
-        if host == suffix or host.endswith("." + suffix):
-            return True
-    return False
+def _count_subdomain(page_url):
+    host = (urlparse(page_url).hostname or "").lower()
+    if host.endswith(".uci.edu"):
+        if page_url not in COUNTED_PER_SUBDOMAIN[host]:
+            COUNTED_PER_SUBDOMAIN[host].add(page_url)
+            SUBDOMAIN_COUNTS[host] += 1
 
-def _count_subdomain(host: str, url: str):
-    # Count unique crawled pages per subdomain under uci.edu.
-    if not host.endswith(".uci.edu"):
-        return
-
-    seen_set = COUNTED_PER_SUBDOMAIN.get(host)
-    if seen_set is None:
-        seen_set = set()
-        COUNTED_PER_SUBDOMAIN[host] = seen_set
-
-    if url not in seen_set:
-        seen_set.add(url)
-        SUBDOMAIN_COUNTS[host] = SUBDOMAIN_COUNTS.get(host, 0) + 1
+def _write_corpus(page_url, text):
+    # Hash URL to create unique filename
+    h = md5(page_url.encode("utf-8", errors="ignore")).hexdigest()
+    with open(os.path.join(CORPUS_DIRECTORY, f"{h}.txt"), "w", encoding="utf-8") as f:
+        f.write(text)
 
 def is_valid(url):
-    # Decide whether to crawl this url or not. 
-    # If you decide to crawl it, return True; otherwise return False.
-    # There are already some conditions that return False.
     try:
         parsed = urlparse(url)
-
-        if parsed.scheme not in {"http", "https"}:
-            return False
+        if parsed.scheme not in {"http", "https"}: return False
 
         host = (parsed.hostname or "").lower()
-        if not host:
+        if not host or not any(host == s or host.endswith("." + s) for s in ALLOWED_SUFFIXES):
             return False
 
-        # Domain restriction
-        if not _host_allowed(host):
-            return False
+        if host in ICS_SUBDOMAIN_BLACKLIST: return False
 
-        # Block known-bad subdomains
-        if host in ICS_SUBDOMAIN_BLACKLIST:
-            return False
+        path = (parsed.path or "").lower()
+        if "wp-login.php" in path or BAD_EXT_RE.match(path): return False
 
-        # Block obvious login/admin
-        if "wp-login.php" in parsed.path.lower():
-            return False
-
-        # Block non-html resources by extension
-        if BAD_EXT_RE.match(parsed.path.lower()):
-            return False
-
+        # ADVANCED TRAP DETECTION (The "Best of" Your Code)
         lower_url = url.lower()
-
-        # Keyword blacklist
         for bad in BLACKLIST_KEYWORDS:
-            if bad in lower_url:
-                return False
+            if bad in lower_url: return False
 
-        # DokuWiki traps
-        if "doku.php" in parsed.path.lower():
-            return False
-
-        # Events/calendar-ish trap paths
-        if re.search(r"/events(\b|/|$)", lower_url):
-            return False
-
-        # Query trap heuristics (prevents tab_files/tab_details/do=image loops)
+        # Query Parameter Explosion Heuristic
         qs = parse_qs(parsed.query)
-        if len(qs) > 6:
-            return False
-        bad_q_keys = {"do", "tab_files", "tab_details", "image", "ns", "sectok"}
-        if any(k.lower() in bad_q_keys for k in qs.keys()):
-            return False
+        if len(qs) > 5: return False
+        bad_keys = {"do", "ns", "sectok", "tab_files", "image"}
+        if any(k.lower() in bad_keys for k in qs.keys()): return False
 
-        # Calendar trap: date-based deep paths
-        path = parsed.path.lower()
-        if CALENDAR_TRAPS.search(path) and path.count("/") > 4:
-            return False
-
-        # Repeating segment heuristic
-        if re.search(r"/(.+/)\1", path):
-            return False
-
-        # Path depth limit
-        if path.count("/") > 12:
-            return False
-
-        # Super long URLs are often traps
-        if len(url) > 300:
-            return False
+        # Structural Traps
+        if CALENDAR_TRAPS.search(path) and path.count("/") > 4: return False
+        if re.search(r"/(.+/)\1", path): return False # Repeating segments
+        if path.count("/") > 10 or len(url) > 250: return False
 
         return True
-
     except Exception:
         return False
 
 def _print_report():
-    print("\n========== CRAWL REPORT ==========")
-
-    # 1) Unique pages
-    print(f"Unique pages (defragmented): {len(UNIQUE_PAGES)}")
-
-    # 2) Longest page
-    print(f"Longest page by word count: {LONGEST_PAGE[0]} ({LONGEST_PAGE[1]} words)")
-
-    # 3) Top 50 words
-    top50 = sorted(WORD_FREQ.items(), key=lambda x: (-x[1], x[0]))[:50]
-    print("\nTop 50 words (stopwords removed):")
-    for w, c in top50:
+    print("\n" + "="*30 + " CRAWL REPORT " + "="*30)
+    print(f"Unique pages: {len(UNIQUE_PAGES)}")
+    print(f"Longest page: {LONGEST_PAGE[0]} ({LONGEST_PAGE[1]} words)")
+    
+    print("\nTop 50 words:")
+    for w, c in sorted(WORD_FREQ.items(), key=lambda x: (-x[1], x[0]))[:50]:
         print(f"{w}: {c}")
 
-    # 4) Subdomains
-    print("\nSubdomains in uci.edu (alphabetical):")
+    print("\nSubdomains:")
     for host in sorted(SUBDOMAIN_COUNTS.keys()):
         print(f"{host}, {SUBDOMAIN_COUNTS[host]}")
-
-    print("==================================\n")
+    print("="*74 + "\n")
 
 atexit.register(_print_report)
