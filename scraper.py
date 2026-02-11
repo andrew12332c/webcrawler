@@ -106,6 +106,25 @@ BAD_EXT_RE = re.compile(r".*\.(css|js|bmp|gif|jpe?g|ico|png|tiff?|mid|mp2|mp3|mp
 WORD_RE = re.compile(r"[a-zA-Z0-9]+")
 
 def scraper(url, resp):
+    """
+    Entry point called by the crawler framework for every fetched URL.
+
+    Delegates to extract_next_links() to obtain outbound links, then
+    filters them through is_valid() before returning. Only successfully
+    fetched pages (HTTP 200) are processed.
+
+    Parameters
+    ----------
+    url  : str  – The URL that was requested by the crawler.
+    resp : obj  – Response object with attributes:
+                    .status        (int)  HTTP status code
+                    .raw_response  (obj)  Requests-like response with .content,
+                                         .headers, and .url
+
+    Returns
+    -------
+    list[str] – Validated outbound URLs to add to the crawl frontier.
+    """
     if resp is None or resp.status != 200:
         return []
     
@@ -113,6 +132,32 @@ def scraper(url, resp):
     return [link for link in links if is_valid(link)]
 
 def extract_next_links(url, resp):
+    """
+    Parse an HTML page, collect all outbound <a href> links, and perform
+    textual analysis (word count, subdomain counting, word frequency).
+
+    Processing steps
+    ----------------
+    1. Guard checks – skip on bad status, missing content, oversized body,
+       non-HTML content type, or already-visited URL.
+    2. Mark the page as visited to prevent reprocessing.
+    3. Parse HTML with BeautifulSoup/lxml and collect absolute URLs.
+    4. Strip non-content tags (script, style, noscript) then extract text.
+    5. If the text meets the minimum length threshold:
+       a. Count this page toward its subdomain tally.
+       b. Tokenise and count words; update LONGEST_PAGE if applicable.
+       c. Filter stopwords and update the global WORD_FREQ counter.
+       d. Write filtered text to disk for persistence/debugging.
+
+    Parameters
+    ----------
+    url  : str – Original requested URL (used as fallback if resp.url absent).
+    resp : obj – Response object (see scraper() docstring).
+
+    Returns
+    -------
+    list[str] – All absolute URLs found on the page (not yet validated).
+    """
     if resp is None or resp.status != 200 or resp.raw_response is None:
         return []
 
@@ -176,6 +221,17 @@ def extract_next_links(url, resp):
     return links
 
 def _count_subdomain(page_url):
+    """
+    Increment the unique-page count for the subdomain of page_url.
+
+    Only counts URLs that belong to the uci.edu domain family (either
+    exactly "uci.edu" or any subdomain thereof). Each unique URL is
+    counted at most once per hostname thanks to COUNTED_PER_SUBDOMAIN.
+
+    Parameters
+    ----------
+    page_url : str – Defragmented absolute URL of the page being processed.
+    """
     host = (urlparse(page_url).hostname or "").lower()
     if "uci.edu" in host and (host == "uci.edu" or host.endswith(".uci.edu")):
         if page_url not in COUNTED_PER_SUBDOMAIN[host]:
@@ -183,11 +239,47 @@ def _count_subdomain(page_url):
             SUBDOMAIN_COUNTS[host] += 1
 
 def _write_corpus(page_url, text):
+    """
+    Write the filtered (stopword-removed) text of a page to the corpus
+    directory as a plain-text file.
+
+    The filename is the MD5 hex digest of the URL, which:
+      - guarantees uniqueness (no two URLs produce the same hash),
+      - avoids filesystem-unsafe characters that appear in URLs,
+      - allows the original URL to be recovered by rehashing if needed.
+
+    Parameters
+    ----------
+    page_url : str – Defragmented absolute URL (used to derive filename).
+    text     : str – Space-joined filtered word tokens for this page.
+    """
     # Hash URL to create unique filename
     h = md5(page_url.encode("utf-8", errors="ignore")).hexdigest()
     with open(os.path.join(CORPUS_DIRECTORY, f"{h}.txt"), "w", encoding="utf-8") as f:
         f.write(text)
 def is_valid(url):
+    """
+    Determine whether a URL should be added to the crawl frontier.
+
+    A URL passes validation if and only if ALL of the following hold:
+      1. Scheme is http or https.
+      2. Hostname ends with one of the four allowed UCI suffixes.
+      3. Hostname is not on the ICS subdomain blacklist.
+      4. Path does not end with a non-HTML file extension.
+      5. URL does not contain any blacklisted keywords.
+      6. Query string has ≤ 3 parameters and no known trap parameter names.
+      7. Path does not contain a calendar date segment (YYYY/MM/DD etc.).
+      8. Path does not contain a repeated directory segment (loop detector).
+      9. Path depth ≤ 8 slashes and total URL length ≤ 180 characters.
+
+    Parameters
+    ----------
+    url : str – Absolute URL to evaluate.
+
+    Returns
+    -------
+    bool – True if the URL is safe to crawl, False otherwise.
+    """
     try:
         parsed = urlparse(url)
         if parsed.scheme not in {"http", "https"}: return False
@@ -231,6 +323,16 @@ def is_valid(url):
         return False
 
 def _print_report():
+    """
+    Print a formatted crawl summary to stdout.
+
+    Registered via atexit.register() so it runs automatically when the
+    crawler process exits (cleanly or after KeyboardInterrupt). Outputs:
+      - Total number of unique pages crawled
+      - URL and word count of the longest page
+      - Top 50 most-frequent non-stopword words (sorted by count, then alpha)
+      - All discovered subdomains and their unique page counts (sorted alpha)
+    """
     print("\n" + "="*30 + " CRAWL REPORT " + "="*30)
     print(f"Unique pages: {len(UNIQUE_PAGES)}")
     print(f"Longest page: {LONGEST_PAGE[0]} ({LONGEST_PAGE[1]} words)")
