@@ -1,9 +1,8 @@
 import re
+import atexit
 from urllib.parse import urlparse, urljoin, urldefrag, parse_qs
 from bs4 import BeautifulSoup
-from PartA import tokenize, computeWordFrequencies, printFrequencies
-import atexit
-
+from collections import Counter 
 # Global
 SUBDOMAIN_COUNTS = {}
 COUNTED_PER_SUBDOMAIN = {}
