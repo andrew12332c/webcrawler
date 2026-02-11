@@ -9,7 +9,9 @@ from bs4 import BeautifulSoup
 # -------------------------
 # Configuration & Globals
 # -------------------------
-# Merged Stopwords: Ensures we use the full list
+# Comprehensive English stopword list used to filter out non-meaningful words
+# from word-frequency analysis. Words in this set are ignored when building
+# the WORD_FREQ counter so the top-N results reflect content-bearing terms.
 STOPWORDS = {
     "a","about","above","after","again","against","all","am","an","and","any",
     "are","aren't","as","at","be","because","been","before","being","below",
@@ -32,29 +34,61 @@ STOPWORDS = {
     "you're","you've","your","yours","yourself","yourselves"
 }
 
+# ── In-memory statistics accumulators ────────────────────────────────
+# Maps each hostname (e.g. "ics.uci.edu") → number of unique pages crawled under that subdomain. Populated by _count_subdomain().
 SUBDOMAIN_COUNTS = defaultdict(int)
+
+# Tracks which URLs have already been counted for each subdomain so we never
+# double-count a page if it is encountered more than once.
+# Structure: { hostname: set_of_urls_already_counted }
 COUNTED_PER_SUBDOMAIN = defaultdict(set)
+
+# Tuple of (url, word_count) for the single page with the most words seen so far.
+# Initialised to an empty URL with zero words; updated in extract_next_links().
 LONGEST_PAGE = ("", 0)
+
+
+# Set of defragmented, fully-qualified URLs that have already been processed.
+# Used as a visited-page guard to prevent redundant work.
 UNIQUE_PAGES = set()
+
+
+# Running frequency count of meaningful (non-stopword, length > 1) words seen across all crawled pages. Used to produce the top-50 word report.
 WORD_FREQ = Counter()
 
-# Persistence setup from Reference
+# Directory where per-page filtered text is written for safety/debugging.
+# Created automatically if it does not already exist.
 CORPUS_DIRECTORY = "data/corpus"
 os.makedirs(CORPUS_DIRECTORY, exist_ok=True)
 
+# Pages larger than this byte threshold are skipped to avoid memory issues with unusually large or binary-embedded HTML responses.
 MAX_PAGE_SIZE = 5_000_000
+
+# Pages whose visible text is shorter than this character count are considered low-content (e.g. redirect stubs, empty shells) and are not analysed.
 MIN_TEXT_LEN = 50
+
+
+# Only URLs whose hostname ends with one of these suffixes are crawled.
+# Anything outside these four UCI domains is discarded by is_valid().
 ALLOWED_SUFFIXES = ("ics.uci.edu", "cs.uci.edu", "informatics.uci.edu", "stat.uci.edu")
+
+# Specific ICS subdomains known to be either behind authentication, intranet-only, or otherwise undesirable. Requests to these hosts are always rejected.
 ICS_SUBDOMAIN_BLACKLIST = {"ngs.ics.uci.edu", "grape.ics.uci.edu", "intranet.ics.uci.edu"}
 
-# Merged blacklist and Regex patterns
+# If any of these substrings appear anywhere in a URL (case-insensitive), the URL is rejected. They target:
+#   - student org pages unlikely to hold academic content (wics)
+#   - calendar/event listing pages that generate infinite pagination
+#   - DokuWiki action URLs that produce near-duplicate or edit/diff views
+#   - Export/print formats (PDF, iCal) that are not HTMLs
 BLACKLIST_KEYWORDS = {
     "wics", "calendar", "doku", "physics.edu", "eppstein", "gallery",
     "event","events", "ical", "outlook-ical", "share=ical", "print=", 
     "format=pdf", "action=diff", "action=edit", "do=media", "rev="
 }
 
-# Matches YYYY-MM-DD, YYYY/MM/DD, etc.
+# Detects date segments in URL paths (e.g. /2023/04/15 or /2023-04-15).
+# Calendar-driven pages generate a fresh URL for every day in perpetuity,
+# creating a "trap" that would exhaust the crawl frontier.
 CALENDAR_TRAPS = re.compile(
     r"/(20[0-4][0-9]|19[7-9][0-9])"  # Year (1970-2049)
     r"[-/]"                          # Separator (dash or slash)
@@ -62,7 +96,13 @@ CALENDAR_TRAPS = re.compile(
     r"[-/]"                          # Separator (dash or slash)
     r"(0?[1-9]|[12][0-9]|3[01])"     # Day
 )
+
+# Matches URL paths that end with a non-HTML file extension.
+# These resources are not web pages and should not be crawled or returned as candidate links. The list covers images, audio, video, archives, office documents, code artifacts, and other binary formats.
 BAD_EXT_RE = re.compile(r".*\.(css|js|bmp|gif|jpe?g|ico|png|tiff?|mid|mp2|mp3|mp4|wav|avi|mov|mpeg|ram|m4v|mkv|ogg|ogv|pdf|ps|eps|tex|ppt|pptx|doc|docx|xls|xlsx|names|data|dat|exe|bz2|tar|msi|bin|7z|psd|dmg|iso|epub|dll|cnf|tgz|sha1|thmx|mso|arff|rtf|jar|csv|rm|smil|wmv|swf|wma|zip|rar|gz)$", re.IGNORECASE)
+
+# Tokenisation pattern: a "word" is any contiguous run of ASCII letters or digits.
+# Punctuation, whitespace, and unicode characters are treated as delimiters.
 WORD_RE = re.compile(r"[a-zA-Z0-9]+")
 
 def scraper(url, resp):
