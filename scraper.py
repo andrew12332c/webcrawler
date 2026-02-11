@@ -48,8 +48,20 @@ ALLOWED_SUFFIXES = ("ics.uci.edu", "cs.uci.edu", "informatics.uci.edu", "stat.uc
 ICS_SUBDOMAIN_BLACKLIST = {"ngs.ics.uci.edu", "grape.ics.uci.edu", "intranet.ics.uci.edu"}
 
 # Merged blacklist and Regex patterns
-BLACKLIST_KEYWORDS = {"wics", "calendar", "doku", "physics.edu", "eppstein", "\events", "gallery"}
-CALENDAR_TRAPS = re.compile(r"/(20[0-4][0-9]|19[7-9][0-9])(/(0?[1-9]|1[0-2])(/(0?[1-9]|[12][0-9]|3[01]))?)?")
+BLACKLIST_KEYWORDS = {
+    "wics", "calendar", "doku", "physics.edu", "eppstein", "gallery",
+    "event","events", "ical", "outlook-ical", "share=ical", "print=", 
+    "format=pdf", "action=diff", "action=edit", "do=media", "rev="
+}
+
+# Matches YYYY-MM-DD, YYYY/MM/DD, etc.
+CALENDAR_TRAPS = re.compile(
+    r"/(20[0-4][0-9]|19[7-9][0-9])"  # Year (1970-2049)
+    r"[-/]"                          # Separator (dash or slash)
+    r"(0?[1-9]|1[0-2])"              # Month
+    r"[-/]"                          # Separator (dash or slash)
+    r"(0?[1-9]|[12][0-9]|3[01])"     # Day
+)
 BAD_EXT_RE = re.compile(r".*\.(css|js|bmp|gif|jpe?g|ico|png|tiff?|mid|mp2|mp3|mp4|wav|avi|mov|mpeg|ram|m4v|mkv|ogg|ogv|pdf|ps|eps|tex|ppt|pptx|doc|docx|xls|xlsx|names|data|dat|exe|bz2|tar|msi|bin|7z|psd|dmg|iso|epub|dll|cnf|tgz|sha1|thmx|mso|arff|rtf|jar|csv|rm|smil|wmv|swf|wma|zip|rar|gz)$", re.IGNORECASE)
 WORD_RE = re.compile(r"[a-zA-Z0-9]+")
 
@@ -135,7 +147,6 @@ def _write_corpus(page_url, text):
     h = md5(page_url.encode("utf-8", errors="ignore")).hexdigest()
     with open(os.path.join(CORPUS_DIRECTORY, f"{h}.txt"), "w", encoding="utf-8") as f:
         f.write(text)
-
 def is_valid(url):
     try:
         parsed = urlparse(url)
@@ -150,21 +161,30 @@ def is_valid(url):
         path = (parsed.path or "").lower()
         if "wp-login.php" in path or BAD_EXT_RE.match(path): return False
 
-        # ADVANCED TRAP DETECTION (The "Best of" Your Code)
         lower_url = url.lower()
+        # 1. Expanded Keyword Check
         for bad in BLACKLIST_KEYWORDS:
             if bad in lower_url: return False
 
-        # Query Parameter Explosion Heuristic
+        # 2. Query Trap Safeguard (Crucial for UCI ISG Traps)
         qs = parse_qs(parsed.query)
-        if len(qs) > 5: return False
-        bad_keys = {"do", "ns", "sectok", "tab_files", "image"}
-        if any(k.lower() in bad_keys for k in qs.keys()): return False
+        # Block if more than 3 params OR if specific 'export' params exist
+        if len(qs) > 3: return False
+        
+        trap_params = {"ical", "outlook-ical", "share", "display", "view", "action"}
+        if any(k.lower() in trap_params for k in qs.keys()):
+            return False
 
-        # Structural Traps
-        if CALENDAR_TRAPS.search(path) and path.count("/") > 4: return False
-        if re.search(r"/(.+/)\1", path): return False # Repeating segments
-        if path.count("/") > 12 or len(url) > 250: return False
+        # 3. Structural & Date Traps
+        # Catch date strings in the path
+        if CALENDAR_TRAPS.search(path): return False
+        
+        # Catch deep path loops (e.g., /events/events/events)
+        if re.search(r"/(.+/)\1", path): return False 
+        
+        # 4. Global Limits
+        # If the path is too deep or URL too long, it's usually a trap
+        if path.count("/") > 8 or len(url) > 180: return False
 
         return True
     except Exception:
