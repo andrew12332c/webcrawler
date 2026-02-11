@@ -168,6 +168,8 @@ def is_valid(url):
 
         # 2. Query Trap Safeguard (Crucial for UCI ISG Traps)
         qs = parse_qs(parsed.query)
+        # Block if more than 3 params OR if specific 'export' params exist
+        if len(qs) > 3: return False
         
         trap_params = {"ical", "outlook-ical", "share", "display", "view", "action"}
         if any(k.lower() in trap_params for k in qs.keys()):
@@ -182,7 +184,7 @@ def is_valid(url):
         
         # 4. Global Limits
         # If the path is too deep or URL too long, it's usually a trap
-        if path.count("/") > 12 or len(url) > 250: return False
+        if path.count("/") > 8 or len(url) > 180: return False
 
         return True
     except Exception:
